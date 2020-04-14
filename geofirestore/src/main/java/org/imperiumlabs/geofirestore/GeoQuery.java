@@ -242,7 +242,8 @@ public class GeoQuery {
                 outstandingQueries.add(query);
                 CollectionReference collectionReference = this.geoFirestore.getCollectionReference();
 
-                Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
+                Query firestoreQuery = collectionReference
+                        .orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
 
                 ListenerRegistration childAddedListener = firestoreQuery.addSnapshotListener(new EventListener<QuerySnapshot>() {
                     @Override
