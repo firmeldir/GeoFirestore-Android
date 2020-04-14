@@ -205,7 +205,11 @@ class GeoFirestore(val collectionReference: CollectionReference) {
      *               supported is about 8587km. If a radius bigger than this is passed we'll cap it.
      * @return The new GeoQuery object
      */
-    fun queryAtLocation(center: GeoPoint, radius: Double) = GeoQuery(this, center, GeoUtils.capRadius(radius))
+    fun queryAtLocation(center: GeoPoint, radius: Double, fireQueryModifier: ((Query) -> Query)? = null)
+            = GeoQuery(this, center, GeoUtils.capRadius(radius),
+            GeoQuery.OnFirestoreQuery{
+                fireQueryModifier?.invoke(it) ?: it
+            })
 
     /**
      * Returns a new SingleGeoQuery object centered at a given location and with the given radius.

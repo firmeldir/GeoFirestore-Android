@@ -24,6 +24,7 @@ import org.imperiumlabs.geofirestore.listeners.GeoQueryEventListener;
 import org.imperiumlabs.geofirestore.core.GeoHash;
 import org.imperiumlabs.geofirestore.core.GeoHashQuery;
 import org.imperiumlabs.geofirestore.util.GeoUtils;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -80,6 +81,7 @@ public class GeoQuery {
     private GeoPoint center;
     private double radius;
 
+    private OnFirestoreQuery modifier;
 
     /**
      * Creates a new GeoQuery object centered at the given location and with the given radius.
@@ -93,6 +95,19 @@ public class GeoQuery {
         this.center = center;
         this.radius = radius * KILOMETER_TO_METER; // Convert from kilometers to meters.
     }
+
+    GeoQuery(GeoFirestore geoFirestore, GeoPoint center, double radius, OnFirestoreQuery modifier) {
+        this.geoFirestore = geoFirestore;
+        this.center = center;
+        this.radius = radius * KILOMETER_TO_METER; // Convert from kilometers to meters.
+
+        this.modifier = modifier;
+    }
+
+    public interface OnFirestoreQuery{
+        @NotNull Query apply(Query query);
+    }
+
 
     private boolean locationIsInQuery(GeoPoint location) {
         return GeoUtils.INSTANCE.distance(new GeoLocation(location.getLatitude(), location.getLongitude()), new GeoLocation(center.getLatitude(), center.getLongitude())) <= this.radius;
@@ -241,9 +256,11 @@ public class GeoQuery {
             if (!oldQueries.contains(query)) {
                 outstandingQueries.add(query);
                 CollectionReference collectionReference = this.geoFirestore.getCollectionReference();
+                Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
 
-                Query firestoreQuery = collectionReference
-                        .orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
+                if(modifier != null){
+                    firestoreQuery = modifier.apply(firestoreQuery);
+                }
 
                 ListenerRegistration childAddedListener = firestoreQuery.addSnapshotListener(new EventListener<QuerySnapshot>() {
                     @Override
@@ -434,6 +451,11 @@ public class GeoQuery {
                 outstandingQueries.add(query);
                 CollectionReference collectionReference = this.geoFirestore.getCollectionReference();
                 Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
+
+                if(modifier != null){
+                    firestoreQuery = modifier.apply(firestoreQuery);
+                }
+
                 queries.add(firestoreQuery);
             }
         }
