@@ -3,8 +3,6 @@ package org.imperiumlabs.geofirestore;
 
 // FULLY TESTED
 
-import android.util.Log;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -35,6 +33,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.ArrayList;
 
+import kotlin.Pair;
+
 // TODO: 05/05/19 Android Studio show error for javadoc in @throws IllegalArgumentException
 /**
  * A GeoQuery object can be used for geo queries in a given circle. The GeoQuery class is thread safe.
@@ -45,14 +45,21 @@ public class GeoQuery {
     private static class LocationInfo {
         final GeoPoint location;
         final boolean inGeoQuery;
+        final boolean isActive;
+
         final GeoHash geoHash;
         final DocumentSnapshot documentSnapshot;
 
-        LocationInfo(GeoPoint location, boolean inGeoQuery, DocumentSnapshot documentSnapshot) {
+        LocationInfo(GeoPoint location, boolean inGeoQuery, boolean isActive, DocumentSnapshot documentSnapshot) {
             this.location = location;
             this.inGeoQuery = inGeoQuery;
+            this.isActive = isActive;
             this.geoHash = new GeoHash(new GeoLocation(location.getLatitude(), location.getLongitude()));
             this.documentSnapshot = documentSnapshot;
+        }
+
+        public Boolean isIn(){
+            return inGeoQuery && isActive;
         }
     }
 
@@ -82,8 +89,7 @@ public class GeoQuery {
 
     private GeoPoint center;
     private double radius;
-
-    private OnFirestoreQuery modifier;
+    private String activeField;
 
     /**
      * Creates a new GeoQuery object centered at the given location and with the given radius.
@@ -92,48 +98,31 @@ public class GeoQuery {
      * @param radius The radius of the query, in kilometers. The maximum radius that is
      * supported is about 8587km. If a radius bigger than this is passed we'll cap it.
      */
-    GeoQuery(GeoFirestore geoFirestore, GeoPoint center, double radius) {
+    GeoQuery(GeoFirestore geoFirestore, GeoPoint center, double radius, String activeField) {
         this.geoFirestore = geoFirestore;
         this.center = center;
         this.radius = radius * KILOMETER_TO_METER; // Convert from kilometers to meters.
+        this.activeField = activeField;
     }
-
-    GeoQuery(GeoFirestore geoFirestore, GeoPoint center, double radius, OnFirestoreQuery modifier) {
-        this.geoFirestore = geoFirestore;
-        this.center = center;
-        this.radius = radius * KILOMETER_TO_METER; // Convert from kilometers to meters.
-
-        this.modifier = modifier;
-    }
-
-    public interface OnFirestoreQuery{
-        @NotNull Query apply(Query query);
-    }
-
 
     private boolean locationIsInQuery(GeoPoint location) {
         return GeoUtils.INSTANCE.distance(new GeoLocation(location.getLatitude(), location.getLongitude()), new GeoLocation(center.getLatitude(), center.getLongitude())) <= this.radius;
     }
 
-    private void updateLocationInfo(final DocumentSnapshot documentSnapshot, final GeoPoint location) {
-
-        final String documentID = documentSnapshot.getId();
+    private void updateLocationInfo(final DocumentSnapshot documentSnapshot, final GeoPoint location, final Boolean isActive) {
+        String documentID = documentSnapshot.getId();
         LocationInfo oldInfo = this.locationInfos.get(documentID);
 
         boolean isNew = oldInfo == null;
         final boolean changedLocation = oldInfo != null && !oldInfo.location.equals(location);
-        boolean wasInQuery = oldInfo != null && oldInfo.inGeoQuery;
+        boolean wasInQuery = oldInfo != null && oldInfo.isIn();
 
-        boolean isInQuery = this.locationIsInQuery(location);
-
-        Log.i("VLAD", "updateLocationInfo()  " + wasInQuery + "  " + isInQuery);
-
+        boolean isInQuery = this.locationIsInQuery(location) && isActive;
         if ((isNew || !wasInQuery) && isInQuery) {
             for (final GeoQueryDataEventListener listener: this.eventListeners) {
                 this.geoFirestore.raiseEvent(new Runnable() {
                     @Override
                     public void run() {
-                        Log.i("VLAD", "listener.onDocumentEntered(documentSnapshot, location);" + " " + documentID);
                         listener.onDocumentEntered(documentSnapshot, location);
                     }
                 });
@@ -143,9 +132,6 @@ public class GeoQuery {
                 this.geoFirestore.raiseEvent(new Runnable() {
                     @Override
                     public void run() {
-
-                        Log.i("VLAD", "listener.onDocumentChanged(documentSnapshot, location);" + " " + documentID);
-
                         if (changedLocation) {
                             listener.onDocumentMoved(documentSnapshot, location);
                         }
@@ -159,15 +145,13 @@ public class GeoQuery {
                 this.geoFirestore.raiseEvent(new Runnable() {
                     @Override
                     public void run() {
-
-                        Log.i("VLAD", "1 listener.onDocumentExited(documentSnapshot);" + " " + documentID);
-
                         listener.onDocumentExited(documentSnapshot);
                     }
                 });
             }
         }
-        LocationInfo newInfo = new LocationInfo(location, this.locationIsInQuery(location), documentSnapshot);
+
+        LocationInfo newInfo = new LocationInfo(location, this.locationIsInQuery(location), isActive, documentSnapshot);
         this.locationInfos.put(documentID, newInfo);
     }
 
@@ -249,8 +233,6 @@ public class GeoQuery {
     }
 
     private void setupQueries() {
-        Log.i("VLAD", "setupQueries()");
-
         Set<GeoHashQuery> oldQueries = (queries == null) ? new HashSet<GeoHashQuery>() : queries;
         Set<GeoHashQuery> newQueries = GeoHashQuery.Companion.queriesAtLocation(new GeoLocation(center.getLatitude(), center.getLongitude()), radius);
         this.queries = newQueries;
@@ -271,11 +253,8 @@ public class GeoQuery {
             if (!oldQueries.contains(query)) {
                 outstandingQueries.add(query);
                 CollectionReference collectionReference = this.geoFirestore.getCollectionReference();
-                Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
-
-                if(modifier != null){
-                    firestoreQuery = modifier.apply(firestoreQuery);
-                }
+                Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue())
+                        .whereEqualTo(activeField, true);
 
                 ListenerRegistration childAddedListener = firestoreQuery.addSnapshotListener(new EventListener<QuerySnapshot>() {
                     @Override
@@ -283,7 +262,6 @@ public class GeoQuery {
                         if (queryDocumentSnapshots != null && e == null){
                             for(final DocumentChange docChange: queryDocumentSnapshots.getDocumentChanges()){
                                 if (docChange.getType() == DocumentChange.Type.ADDED){
-                                    Log.i("VLAD", "onEvent childAdded(docChange.getDocument())");
                                     childAdded(docChange.getDocument());
                                 }
                             }
@@ -296,7 +274,6 @@ public class GeoQuery {
                         if (queryDocumentSnapshots != null && e == null){
                             for(final DocumentChange docChange: queryDocumentSnapshots.getDocumentChanges()){
                                 if (docChange.getType() == DocumentChange.Type.REMOVED){
-                                    Log.i("VLAD", "onEvent childRemoved(docChange.getDocument())");
                                     childRemoved(docChange.getDocument());
                                 }
                             }
@@ -309,7 +286,6 @@ public class GeoQuery {
                         if (queryDocumentSnapshots != null && e == null){
                             for(final DocumentChange docChange: queryDocumentSnapshots.getDocumentChanges()){
                                 if (docChange.getType() == DocumentChange.Type.MODIFIED){
-                                    Log.i("VLAD", "onEvent childChanged(docChange.getDocument())");
                                     childChanged(docChange.getDocument());
                                 }
                             }
@@ -327,15 +303,16 @@ public class GeoQuery {
             LocationInfo oldLocationInfo = info.getValue();
 
             if (oldLocationInfo != null) {
-                updateLocationInfo(oldLocationInfo.documentSnapshot, oldLocationInfo.location);
+                updateLocationInfo(oldLocationInfo.documentSnapshot, oldLocationInfo.location, oldLocationInfo.isActive);
             }
         }
         // remove locations that are not part of the geo query anymore
         Iterator<Map.Entry<String, LocationInfo>> it = this.locationInfos.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<String, LocationInfo> entry = it.next();
-            if (!this.geoHashQueriesContainGeoHash(entry.getValue().geoHash)) {
-                Log.i("VLAD", "if (!this.geoHashQueriesContainGeoHash(entry.getValue().geoHash))");
+            LocationInfo info = entry.getValue();
+
+            if (!this.geoHashQueriesContainGeoHash(info.geoHash) || !info.isActive) {
                 it.remove();
             }
         }
@@ -344,23 +321,32 @@ public class GeoQuery {
     }
 
     private void childAdded(DocumentSnapshot documentSnapshot) {
-        GeoPoint location = GeoFirestore.Companion.getLocationValue(documentSnapshot);
-        if (location != null) {
-            this.updateLocationInfo(documentSnapshot, location);
+        Pair<GeoPoint, Boolean> pair = GeoFirestore.Companion.getActiveLocationPair(documentSnapshot, activeField);
+
+        if (pair != null) {
+            GeoPoint location = pair.getFirst();
+            Boolean isActive = pair.getSecond();
+
+            if(location != null && isActive != null){
+                this.updateLocationInfo(documentSnapshot, location, isActive);
+            }
         }
     }
 
     private void childChanged(DocumentSnapshot documentSnapshot) {
-        GeoPoint location = GeoFirestore.Companion.getLocationValue(documentSnapshot);
-        if (location != null) {
-            this.updateLocationInfo(documentSnapshot, location);
+        Pair<GeoPoint, Boolean> pair = GeoFirestore.Companion.getActiveLocationPair(documentSnapshot, activeField);
+
+        if (pair != null) {
+            GeoPoint location = pair.getFirst();
+            Boolean isActive = pair.getSecond();
+
+            if(location != null && isActive != null){
+                this.updateLocationInfo(documentSnapshot, location, isActive);
+            }
         }
     }
 
     private void childRemoved(DocumentSnapshot documentSnapshot) {
-
-        Log.i("VLAD", "childRemoved");
-
         final String documentID = documentSnapshot.getId();
         final LocationInfo info = this.locationInfos.get(documentID);
         if (info != null) {
@@ -370,19 +356,15 @@ public class GeoQuery {
                     if (task.isSuccessful()){
 
                         synchronized (GeoQuery.this) {
-                            GeoPoint location = GeoFirestore.Companion.getLocationValue(task.getResult());
+                            Pair<GeoPoint, Boolean> pair = GeoFirestore.Companion.getActiveLocationPair(task.getResult(), activeField);
+                            GeoPoint location = pair.getFirst();
+                            Boolean isActive = pair.getSecond();
+
                             GeoHash hash = (location != null) ? new GeoHash(new GeoLocation(location.getLatitude(), location.getLongitude())) : null;
 
-                            Log.i("VLAD", "childRemoved 1");
-
-                            if (hash == null || !GeoQuery.this.geoHashQueriesContainGeoHash(hash)) {
+                            if (hash == null || !GeoQuery.this.geoHashQueriesContainGeoHash(hash) || !isActive) {
                                 final LocationInfo locInfo = locationInfos.remove(documentID);
-
-                                Log.i("VLAD", "childRemoved 2");
-
-                                if (locInfo != null && locInfo.inGeoQuery) {
-
-                                    Log.i("VLAD", "childRemoved 3");
+                                if (locInfo != null && locInfo.isIn()) {
 
                                     for (final GeoQueryDataEventListener listener: GeoQuery.this.eventListeners) {
                                         GeoQuery.this.geoFirestore.raiseEvent(new Runnable() {
@@ -432,7 +414,7 @@ public class GeoQuery {
             for (final Map.Entry<String, LocationInfo> entry: this.locationInfos.entrySet()) {
                 final LocationInfo info = entry.getValue();
 
-                if (info.inGeoQuery) {
+                if (info.isIn()) {
                     this.geoFirestore.raiseEvent(new Runnable() {
                         @Override
                         public void run() {
@@ -480,11 +462,8 @@ public class GeoQuery {
             if (!oldQueries.contains(query)) {
                 outstandingQueries.add(query);
                 CollectionReference collectionReference = this.geoFirestore.getCollectionReference();
-                Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue());
-
-                if(modifier != null){
-                    firestoreQuery = modifier.apply(firestoreQuery);
-                }
+                Query firestoreQuery = collectionReference.orderBy("g").startAt(query.getStartValue()).endAt(query.getEndValue())
+                        .whereEqualTo(activeField, true);
 
                 queries.add(firestoreQuery);
             }

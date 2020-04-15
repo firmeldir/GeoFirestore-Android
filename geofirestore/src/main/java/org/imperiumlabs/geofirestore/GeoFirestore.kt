@@ -48,6 +48,29 @@ class GeoFirestore(val collectionReference: CollectionReference) {
                 null
             }
         }
+
+        fun getActiveLocationPair(documentSnapshot: DocumentSnapshot, activeField: String): Pair<GeoPoint, Boolean>? {
+            return try {
+
+                val activityObj = documentSnapshot.data!![activeField] as Boolean
+
+                when (val locationDataRaw = documentSnapshot.data!!["l"]) {
+                    is List<*> -> {
+                        val latitudeObj = locationDataRaw[0] as Double
+                        val longitudeObj = locationDataRaw[1] as Double
+                        if (locationDataRaw.size == 2 && GeoLocation.coordinatesValid(latitudeObj, longitudeObj))
+                            Pair(GeoPoint(latitudeObj, longitudeObj), activityObj)
+                        else null
+                    }
+                    is GeoPoint -> Pair(locationDataRaw, activityObj)
+                    else -> null
+                }
+            } catch (e: NullPointerException) {
+                null
+            } catch (e: ClassCastException) {
+                null
+            }
+        }
     }
 
     /**
@@ -205,11 +228,8 @@ class GeoFirestore(val collectionReference: CollectionReference) {
      *               supported is about 8587km. If a radius bigger than this is passed we'll cap it.
      * @return The new GeoQuery object
      */
-    fun queryAtLocation(center: GeoPoint, radius: Double, fireQueryModifier: ((Query) -> Query)? = null)
-            = GeoQuery(this, center, GeoUtils.capRadius(radius),
-            GeoQuery.OnFirestoreQuery{
-                fireQueryModifier?.invoke(it) ?: it
-            })
+    fun queryAtLocation(center: GeoPoint, radius: Double, activeField: String)
+            = GeoQuery(this, center, GeoUtils.capRadius(radius), activeField)
 
     /**
      * Returns a new SingleGeoQuery object centered at a given location and with the given radius.
