@@ -53,9 +53,7 @@ class GeoFirestore(val collectionReference: CollectionReference) {
         fun getActiveLocationPair(documentSnapshot: DocumentSnapshot, activeField: String): Pair<GeoPoint, Boolean>? {
             return try {
 
-                val activityObj = documentSnapshot.data!![activeField] as Boolean
-
-                Log.i("VLAD", "2 getActiveLocationPair : $activityObj")
+                val activityObj = documentSnapshot.getBoolean(activeField)!!
 
                 when (val locationDataRaw = documentSnapshot.data!!["l"]) {
                     is List<*> -> {
@@ -69,10 +67,8 @@ class GeoFirestore(val collectionReference: CollectionReference) {
                     else -> null
                 }
             } catch (e: NullPointerException) {
-                Log.e("VLAD", "2 getActiveLocationPair : ${e.message.toString()}")
                 null
             } catch (e: ClassCastException) {
-                Log.e("VLAD", "2 getActiveLocationPair : ${e.message.toString()}")
                 null
             }
         }
