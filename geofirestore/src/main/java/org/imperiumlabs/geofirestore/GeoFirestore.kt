@@ -1,5 +1,6 @@
 package org.imperiumlabs.geofirestore
 
+import android.util.Log
 import com.google.android.gms.tasks.Task
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.firestore.*
@@ -54,6 +55,8 @@ class GeoFirestore(val collectionReference: CollectionReference) {
 
                 val activityObj = documentSnapshot.data!![activeField] as Boolean
 
+                Log.i("VLAD", "2 getActiveLocationPair : $activityObj")
+
                 when (val locationDataRaw = documentSnapshot.data!!["l"]) {
                     is List<*> -> {
                         val latitudeObj = locationDataRaw[0] as Double
@@ -66,8 +69,10 @@ class GeoFirestore(val collectionReference: CollectionReference) {
                     else -> null
                 }
             } catch (e: NullPointerException) {
+                Log.e("VLAD", "2 getActiveLocationPair : ${e.message.toString()}")
                 null
             } catch (e: ClassCastException) {
+                Log.e("VLAD", "2 getActiveLocationPair : ${e.message.toString()}")
                 null
             }
         }

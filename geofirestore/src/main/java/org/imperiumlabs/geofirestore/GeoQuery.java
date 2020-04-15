@@ -3,6 +3,8 @@ package org.imperiumlabs.geofirestore;
 
 // FULLY TESTED
 
+import android.util.Log;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -118,6 +120,9 @@ public class GeoQuery {
         boolean wasInQuery = oldInfo != null && oldInfo.isIn();
 
         boolean isInQuery = this.locationIsInQuery(location) && isActive;
+
+        Log.i("VLAD", "4" + wasInQuery + " " + isInQuery + " " + oldInfo.isIn());
+
         if ((isNew || !wasInQuery) && isInQuery) {
             for (final GeoQueryDataEventListener listener: this.eventListeners) {
                 this.geoFirestore.raiseEvent(new Runnable() {
@@ -262,6 +267,7 @@ public class GeoQuery {
                         if (queryDocumentSnapshots != null && e == null){
                             for(final DocumentChange docChange: queryDocumentSnapshots.getDocumentChanges()){
                                 if (docChange.getType() == DocumentChange.Type.ADDED){
+                                    Log.i("VLAD", "1 childAdded");
                                     childAdded(docChange.getDocument());
                                 }
                             }
@@ -324,10 +330,16 @@ public class GeoQuery {
         Pair<GeoPoint, Boolean> pair = GeoFirestore.Companion.getActiveLocationPair(documentSnapshot, activeField);
 
         if (pair != null) {
+
+            Log.i("VLAD", "3");
+
             GeoPoint location = pair.getFirst();
             Boolean isActive = pair.getSecond();
 
             if(location != null && isActive != null){
+
+                Log.i("VLAD", "3");
+
                 this.updateLocationInfo(documentSnapshot, location, isActive);
             }
         }
